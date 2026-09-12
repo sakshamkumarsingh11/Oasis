@@ -1,0 +1,4 @@
+.command-map .map,.investigation .map{position:relative}
+.command-map .map:after,.investigation .map:after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;opacity:.16;background:repeating-linear-gradient(0deg,transparent 0,transparent 3px,rgba(171,224,232,.22) 4px),linear-gradient(120deg,rgba(4,20,29,.18),transparent 42%,rgba(4,20,29,.2));mix-blend-mode:screen}
+.sar-readout{position:absolute;right:15px;bottom:15px;z-index:2;display:grid;gap:2px;padding:8px 10px;border-left:2px solid #73d4e5;background:#071c2ee0;color:#9ec9d3;font:9px 'DM Mono'}
+.sar-readout b{color:#e4f6fa;font-size:9px}.sar-readout span{color:#7fa7b3}

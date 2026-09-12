@@ -13,3 +13,6 @@ ais dataset/
 .env
 *.db
 *.duckdb
+*.pt
+
+
