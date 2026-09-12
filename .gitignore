@@ -14,5 +14,10 @@ ais dataset/
 *.db
 *.duckdb
 *.pt
+node_modules/
+frontend/dist/
 
-
+# Dev / scratch test scripts (not for production)
+test_*.py
+predict_spill.py
+dummy_test_img.png
