@@ -94,50 +94,103 @@ def search_nearby_vessels(
 ) -> Tuple[AISCoverageStatus, List[Dict[str, Any]]]:
     """
     Task 4: AIS Spatiotemporal Correlator.
-    Filters vessels intersecting the origin spatio-temporal envelope.
+    Filters vessels intersecting the origin spatio-temporal envelope using DuckDB.
     """
-    # Use synthetic feed if no external AIS records are supplied
-    ais_records = external_ais_data if external_ais_data is not None else generate_synthetic_ais_feed(origin)
-
-    if not ais_records:
-        return AISCoverageStatus.UNAVAILABLE, []
-
-    candidates = []
-    # Search envelope: uncertainty radius with a safety buffer (+5 km)
+    import duckdb
+    import os
+    import pandas as pd
+    
+    # We define the bounding box of the origin envelope (+ 5km buffer)
     search_radius_km = origin.uncertainty_radius_km + 5.0
-
-    for ship in ais_records:
-        track = ship.get("track", [])
-        if not track:
-            continue
-
-        in_spatial_range = False
-        in_temporal_range = False
-
-        for pt in track:
-            # Check spatial proximity
-            dist = haversine_distance_km(
-                origin.centroid.lat, origin.centroid.lon,
-                pt.location.lat, pt.location.lon
+    lat_deg_km = 111.0
+    lon_deg_km = 111.0 * math.cos(math.radians(origin.centroid.lat))
+    if lon_deg_km == 0: lon_deg_km = 111.0
+    
+    min_lat = origin.centroid.lat - (search_radius_km / lat_deg_km)
+    max_lat = origin.centroid.lat + (search_radius_km / lat_deg_km)
+    min_lon = origin.centroid.lon - (search_radius_km / lon_deg_km)
+    max_lon = origin.centroid.lon + (search_radius_km / lon_deg_km)
+    
+    t_start = origin.time_window_start - timedelta(hours=1)
+    t_end = origin.time_window_end + timedelta(hours=1)
+    
+    start_str = t_start.strftime("%Y-%m-%d %H:%M:%S")
+    end_str = t_end.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Path to AIS dataset
+    csv_pattern = os.path.join(os.path.dirname(__file__), "..", "..", "..", "ais dataset", "*.csv")
+    csv_pattern = os.path.abspath(csv_pattern).replace('\\', '/')
+    
+    query = f"""
+    SELECT mmsi, vessel_name, vessel_type, base_date_time, latitude, longitude, sog, cog
+    FROM read_csv_auto('{csv_pattern}')
+    WHERE latitude BETWEEN {min_lat} AND {max_lat}
+      AND longitude BETWEEN {min_lon} AND {max_lon}
+      AND base_date_time >= '{start_str}'
+      AND base_date_time <= '{end_str}'
+    ORDER BY mmsi, base_date_time
+    """
+    
+    try:
+        con = duckdb.connect()
+        df = con.execute(query).df()
+    except Exception as e:
+        print("DuckDB query failed:", e)
+        return AISCoverageStatus.UNAVAILABLE, []
+        
+    if df.empty:
+        return AISCoverageStatus.UNAVAILABLE, []
+        
+    candidates = []
+    # Group by MMSI to build tracks
+    for mmsi, group in df.groupby('mmsi'):
+        vessel_name = str(group['vessel_name'].iloc[0])
+        vessel_type = str(group['vessel_type'].iloc[0])
+        
+        # Determine human readable type
+        v_type_str = "Unknown"
+        try:
+            v_code = int(float(vessel_type))
+            if 70 <= v_code < 80: v_type_str = "Cargo Ship"
+            elif 80 <= v_code < 90: v_type_str = "Tanker"
+            elif v_code == 30: v_type_str = "Fishing Vessel"
+            elif 50 <= v_code < 60: v_type_str = "Tug/Special"
+            elif v_code == 37: v_type_str = "Pleasure Craft"
+            else: v_type_str = f"Type {v_code}"
+        except:
+            v_type_str = vessel_type
+            
+        track = []
+        for _, row in group.iterrows():
+            ts_str = str(row['base_date_time'])
+            try:
+                # pandas datetime to python datetime
+                ts = row['base_date_time'].to_pydatetime()
+            except:
+                try:
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                except:
+                    ts = t_start
+                    
+            # Ensure naive for compatibility
+            if ts.tzinfo is not None:
+                ts = ts.replace(tzinfo=None)
+                
+            track.append(
+                TrackPoint(
+                    location=GeoPoint(lat=float(row['latitude']), lon=float(row['longitude'])),
+                    timestamp=ts.replace(tzinfo=timezone.utc),
+                    sog_knots=float(row['sog']) if not pd.isna(row['sog']) else 0.0,
+                    cog_degrees=float(row['cog']) if not pd.isna(row['cog']) else 0.0
+                )
             )
-            if dist <= search_radius_km:
-                in_spatial_range = True
-
-            # Check temporal window (with 1 hour buffer)
-            t_start = origin.time_window_start - timedelta(hours=1)
-            t_end = origin.time_window_end + timedelta(hours=1)
-
-            # Ensure datetime comparison works timezone-agnostic
-            pt_ts = pt.timestamp.replace(tzinfo=None)
-            t_start_clean = t_start.replace(tzinfo=None)
-            t_end_clean = t_end.replace(tzinfo=None)
-
-            if t_start_clean <= pt_ts <= t_end_clean:
-                in_temporal_range = True
-
-        # Keep vessel if it was in the spatiotemporal neighborhood
-        if in_spatial_range and in_temporal_range:
-            candidates.append(ship)
-
+            
+        candidates.append({
+            "mmsi": str(mmsi),
+            "vessel_name": vessel_name if vessel_name and vessel_name != "nan" else f"MMSI {mmsi}",
+            "vessel_type": v_type_str,
+            "track": track
+        })
+        
     status = AISCoverageStatus.AVAILABLE if len(candidates) > 0 else AISCoverageStatus.PARTIAL
     return status, candidates

@@ -60,15 +60,18 @@ def _try_lookalike_verification(seg_result: dict, spill_mask: np.ndarray):
                     logger.warning("Failed to load lookalike model from %s: %s", p, e)
                 break
 
-        forensic = verify_spill(raw_sar, spill_mask, model=model, config=config)
-
-        # IMPORTANT: Real SAR data has floating point dB values. Standard JPEGs (uint8)
-        # will fail the dB-contrast physics checks and get incorrectly flagged as lookalikes.
+        # If raw_sar is a standard 8-bit/16-bit image (e.g. from a test JPEG), 
+        # convert it to pseudo-dB space [-30, 0] so the physics thresholds 
+        # and CNN normalization still work as if it were real SAR data.
         if raw_sar.dtype in (np.uint8, np.uint16):
-            logger.info("Uploaded image is 8-bit/16-bit (not dB scale). Bypassing Lookalike mask rejection for demo/test image.")
-            verified_mask = spill_mask
+            max_val = 255.0 if raw_sar.dtype == np.uint8 else 65535.0
+            raw_sar_input = (raw_sar.astype(np.float32) / max_val) * 30.0 - 30.0
+            logger.info("Converted 8/16-bit test image to pseudo-dB for lookalike verifier.")
         else:
-            verified_mask = forensic.get("clean_mask", spill_mask)
+            raw_sar_input = raw_sar
+
+        forensic = verify_spill(raw_sar_input, spill_mask, model=model, config=config)
+        verified_mask = forensic.get("clean_mask", spill_mask)
 
         logger.info(
             "Lookalike verification: status=%s, proceed=%s, oil_prob=%.3f",
