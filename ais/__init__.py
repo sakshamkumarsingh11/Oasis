@@ -69,6 +69,17 @@ from .quality import (  # noqa: F401
     determine_attribution_status,
 )
 
+from .duckdb_store import (  # noqa: F401
+    connect as duckdb_connect,
+    register_csv_data,
+    register_parquet_data,
+    get_table_stats,
+)
+
+from .query import (  # noqa: F401
+    find_candidate_vessels,
+    required_dates,
+)
 logger = logging.getLogger(__name__)
 
 

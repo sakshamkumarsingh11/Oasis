@@ -1,8 +1,15 @@
 venv/
 env/
+.venv/
 __pycache__/
 *.py[cod]
 .vscode/
 .idea/
 ml/datasets/
 ml/weights/*.pth
+ais dataset/
+*.zip
+*.xlsx
+.env
+*.db
+*.duckdb
