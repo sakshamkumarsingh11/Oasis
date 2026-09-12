@@ -21,3 +21,4 @@ frontend/dist/
 test_*.py
 predict_spill.py
 dummy_test_img.png
+Test Images/
