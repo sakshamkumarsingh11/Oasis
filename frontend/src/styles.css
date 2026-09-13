@@ -50,49 +50,27 @@ html,body,*{scrollbar-width:none;-ms-overflow-style:none}::-webkit-scrollbar{wid
   background: rgba(115, 213, 224, 0.5) !important;
 }
 
-@keyframes vessel-pulse {
-  0% { transform: scale(0.92); opacity: 0.75; }
-  65% { transform: scale(1.55); opacity: 0; }
-  100% { transform: scale(1.55); opacity: 0; }
-}
-
 /* Custom Glassmorphic Vessel Marker & Tooltip */
-.ship-radar-token {
+.ship-radar-node {
   cursor: pointer;
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
 }
-.ship-radar-token:hover {
-  transform: scale(1.18) !important;
+.ship-radar-node:hover {
+  transform: scale(1.22) !important;
 }
 .vessel-glass-popup {
   z-index: 30 !important;
+  pointer-events: none !important;
 }
 .vessel-glass-popup .maplibregl-popup-content {
   background: transparent !important;
   box-shadow: none !important;
   padding: 0 !important;
-  border-radius: 9px !important;
+  border-radius: 8px !important;
 }
 .vessel-glass-popup .maplibregl-popup-tip {
-  border-top-color: rgba(8, 24, 38, 0.94) !important;
-  border-bottom-color: rgba(8, 24, 38, 0.94) !important;
+  border-top-color: rgba(8, 24, 38, 0.92) !important;
+  border-bottom-color: rgba(8, 24, 38, 0.92) !important;
 }
-.vessel-glass-popup .maplibregl-popup-close-button {
-  color: #76aabd !important;
-  font-size: 16px !important;
-  padding: 4px 7px !important;
-  outline: none !important;
-  background: transparent !important;
-  border: none !important;
-  right: 6px !important;
-  top: 6px !important;
-  cursor: pointer !important;
-  border-radius: 4px !important;
-}
-.vessel-glass-popup .maplibregl-popup-close-button:hover {
-  color: #fff !important;
-  background: rgba(255, 255, 255, 0.12) !important;
-}
-
 
 
