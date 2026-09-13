@@ -19,6 +19,10 @@ frontend/dist/
 
 # Dev / scratch test scripts (not for production)
 test_*.py
+scratch_*.py
+update_lookalike.py
 predict_spill.py
 dummy_test_img.png
 Test Images/
+*.bak
+.rollback/

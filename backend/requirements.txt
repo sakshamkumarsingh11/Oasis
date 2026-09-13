@@ -8,3 +8,7 @@ shapely>=2.0.0
 scipy>=1.11.0
 httpx>=0.25.0
 reportlab>=4.1.0
+torch
+torchvision
+duckdb
+pandas

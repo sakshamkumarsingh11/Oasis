@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
+import { ScanSearch, Activity, Waves, Droplet, MapPin, Ship, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -50,7 +51,7 @@ interface AnalysisResult {
 }
 
 function DonutChart({ metrics, overall }: { metrics: any[], overall: number }) {
-  const [hover, setHover] = useState<string|null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   const total = metrics.reduce((s, m) => s + m.value, 0) || 1;
   const R = 36;
   const C = 2 * Math.PI * R;
@@ -105,16 +106,18 @@ function DonutChart({ metrics, overall }: { metrics: any[], overall: number }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {metrics.map(m => (
           <div key={m.id}
-               onMouseEnter={() => setHover(m.id)}
-               onMouseLeave={() => setHover(null)}
-               style={{
-                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                 gap: 16, fontSize: 12, color: hover === m.id ? '#fff' : '#8ba4b1',
-                 cursor: 'pointer', transition: 'color 0.2s', fontFamily: 'system-ui, sans-serif'
-               }}>
+            onMouseEnter={() => setHover(m.id)}
+            onMouseLeave={() => setHover(null)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 16, fontSize: 12, color: hover === m.id ? '#fff' : '#8ba4b1',
+              cursor: 'pointer', transition: 'color 0.2s', fontFamily: 'system-ui, sans-serif'
+            }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: m.color,
-                             transform: hover === m.id ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s' }} />
+              <span style={{
+                width: 10, height: 10, borderRadius: '50%', background: m.color,
+                transform: hover === m.id ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s'
+              }} />
               {m.label}
             </div>
             <strong style={{ color: hover === m.id ? '#fff' : '#d9f0f4', font: '11px "DM Mono"' }}>{m.value}%</strong>
@@ -145,13 +148,14 @@ export function SpillLabPage() {
   const [error, setError] = useState<string | null>(null);
   const [noOil, setNoOil] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [spillBoxHovered, setSpillBoxHovered] = useState(false);
 
   // Initialize map
   useEffect(() => {
     if (!mapContainer.current) return;
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      style: { version: 8, sources: { satellite: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Tiles © Esri' } }, layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }] },
       center: [20, 0],
       zoom: 2,
       attributionControl: false,
@@ -192,16 +196,21 @@ export function SpillLabPage() {
   }, [lat, lon]);
 
   const animFrameRef = useRef<number | null>(null);
+  const pathAnimRef = useRef<number | null>(null);
+  const customMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   const clearMapLayers = () => {
     const map = mapRef.current;
     if (!map) return;
     // Cancel any running vessel animation
     if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
+    if (pathAnimRef.current) { cancelAnimationFrame(pathAnimRef.current); pathAnimRef.current = null; }
     const layers = ['spill-fill', 'spill-outline', 'centroid-point', 'drift-origin-fill', 'drift-origin-outline', 'drift-path-line', 'drift-forecast-points'];
     layers.forEach(l => { if (map.getLayer(l)) map.removeLayer(l); });
-    const sources = ['spill-polygon', 'spill-centroid', 'drift-origin', 'drift-path'];
+    const sources = ['spill-polygon', 'spill-centroid', 'drift-origin', 'drift-path', 'drift-forecast'];
     sources.forEach(s => { if (map.getSource(s)) map.removeSource(s); });
+    customMarkersRef.current.forEach(m => m.remove());
+    customMarkersRef.current = [];
     // Clean vessel trajectory layers (up to 5 vessels)
     for (let i = 0; i < 5; i++) {
       [`vessel-trail-${i}`, `vessel-trail-line-${i}`, `vessel-icon-${i}`].forEach(l => { if (map.getLayer(l)) map.removeLayer(l); });
@@ -238,15 +247,15 @@ export function SpillLabPage() {
         coordinates: [res.geometry.centroid.lon, res.geometry.centroid.lat],
       },
     };
-    
+
     // 1. Draw Hindcast Origin (Pixel-based circle so it never vanishes at global zoom)
     let originPt: GeoJSON.Feature<GeoJSON.Point> | null = null;
     let driftPathCoords: number[][] = [];
     let forecastPts: GeoJSON.Feature<GeoJSON.MultiPoint> | null = null;
-    
+
     if (res.drift) {
       const origin = res.drift.hindcast_origin;
-      
+
       originPt = {
         type: 'Feature',
         properties: { radius_km: origin.uncertainty_radius_km },
@@ -255,11 +264,11 @@ export function SpillLabPage() {
           coordinates: [origin.centroid.lon, origin.centroid.lat]
         }
       };
-      
+
       // 2. Build the full path: Origin -> Current Centroid -> Forecast Trajectory
       driftPathCoords.push([origin.centroid.lon, origin.centroid.lat]);
       driftPathCoords.push([res.geometry.centroid.lon, res.geometry.centroid.lat]);
-      
+
       const fCoords: number[][] = [];
       if (res.drift.forecast_trajectory) {
         res.drift.forecast_trajectory.forEach(pt => {
@@ -267,7 +276,7 @@ export function SpillLabPage() {
           fCoords.push([pt.location.lon, pt.location.lat]);
         });
       }
-      
+
       forecastPts = {
         type: 'Feature',
         properties: {},
@@ -287,21 +296,22 @@ export function SpillLabPage() {
       }
     };
 
-    map.addSource('spill-polygon', { type: 'geojson', data: polygon });
-    map.addSource('spill-centroid', { type: 'geojson', data: centroidPt });
-    
+    const emptyFc = { type: 'FeatureCollection', features: [] };
+    map.addSource('spill-polygon', { type: 'geojson', data: emptyFc as any });
+    map.addSource('spill-centroid', { type: 'geojson', data: emptyFc as any });
+
     if (originPt) {
-      map.addSource('drift-origin', { type: 'geojson', data: originPt });
-      map.addSource('drift-path', { type: 'geojson', data: driftPath });
-      if (forecastPts) map.addSource('drift-forecast', { type: 'geojson', data: forecastPts });
-      
+      map.addSource('drift-origin', { type: 'geojson', data: emptyFc as any });
+      map.addSource('drift-path', { type: 'geojson', data: emptyFc as any });
+      if (forecastPts) map.addSource('drift-forecast', { type: 'geojson', data: emptyFc as any });
+
       // Always-visible pixel circle for origin
       map.addLayer({
         id: 'drift-origin-fill',
         type: 'circle',
         source: 'drift-origin',
-        paint: { 
-          'circle-color': '#ff766b', 
+        paint: {
+          'circle-color': '#ff766b',
           'circle-opacity': 0.15,
           'circle-radius': 35 // Always 35 pixels on screen!
         }
@@ -310,11 +320,11 @@ export function SpillLabPage() {
         id: 'drift-origin-outline',
         type: 'circle',
         source: 'drift-origin',
-        paint: { 
+        paint: {
           'circle-color': 'transparent',
-          'circle-stroke-color': '#ff766b', 
+          'circle-stroke-color': '#ff766b',
           'circle-stroke-width': 2,
-          'circle-radius': 35 
+          'circle-radius': 35
         }
       });
       map.addLayer({
@@ -468,18 +478,117 @@ export function SpillLabPage() {
       }, 2200);
     }
 
-    // Fly to the spill, but fit bounds if we have a drift path to show
-    if (driftPathCoords.length > 0) {
-      const bounds = new maplibregl.LngLatBounds();
-      driftPathCoords.forEach(c => bounds.extend(c as [number, number]));
-      map.fitBounds(bounds, { padding: 80, duration: 2000 });
+    // Cinematic Zoom & Plot Sequence
+    if (originPt && driftPathCoords.length > 0) {
+      const originCoords = originPt.geometry.coordinates as [number, number];
+      const destCoords = [res.geometry.centroid.lon, res.geometry.centroid.lat];
+
+      // 1. Zoom into the Origin first
+      map.flyTo({ center: originCoords, zoom: 11.5, duration: 2000 });
+
+      // 2. Wait for flyTo to finish, then reveal origin and start the dynamic plotting
+      setTimeout(() => {
+        (map.getSource('drift-origin') as maplibregl.GeoJSONSource).setData(originPt);
+        
+        const originEl = document.createElement('div');
+        originEl.innerHTML = 'Probable Origin';
+        Object.assign(originEl.style, {
+          background: 'rgba(255, 118, 107, 0.15)', border: '1px solid #ff766b',
+          color: '#ff766b', padding: '4px 8px', borderRadius: '4px',
+          fontFamily: 'DM Mono, monospace', fontSize: '10px',
+          backdropFilter: 'blur(4px)', pointerEvents: 'none', whiteSpace: 'nowrap'
+        });
+        const m1 = new maplibregl.Marker({ element: originEl, anchor: 'left', offset: [20, 0] })
+          .setLngLat(originCoords).addTo(map);
+        customMarkersRef.current.push(m1);
+        
+        // 3. Pan out to reveal the whole path smoothly while plotting
+        const bounds = new maplibregl.LngLatBounds();
+        driftPathCoords.forEach(c => bounds.extend(c as [number, number]));
+        map.fitBounds(bounds, { padding: 80, duration: 2500 });
+        
+        // 4. Smooth progressive plotting of the blue line
+        let startT = performance.now();
+        const animatePath = (now: number) => {
+          let progress = (now - startT) / 2500; // Matches fitBounds duration (2.5s)
+          if (progress > 1) progress = 1;
+          
+          // Smooth easing (easeOutCubic) for natural movement
+          const t = 1 - Math.pow(1 - progress, 3);
+          
+          const currentLon = originCoords[0] + (destCoords[0] - originCoords[0]) * t;
+          const currentLat = originCoords[1] + (destCoords[1] - originCoords[1]) * t;
+          
+          (map.getSource('drift-path') as maplibregl.GeoJSONSource).setData({
+            type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [originCoords, [currentLon, currentLat]] }
+          });
+          
+          if (progress < 1) {
+            pathAnimRef.current = requestAnimationFrame(animatePath);
+          } else {
+            // Animation complete: reveal spill polygon, centroid, and full forecast path
+            (map.getSource('spill-polygon') as maplibregl.GeoJSONSource).setData(polygon);
+            (map.getSource('spill-centroid') as maplibregl.GeoJSONSource).setData(centroidPt);
+            (map.getSource('drift-path') as maplibregl.GeoJSONSource).setData(driftPath);
+            if (forecastPts) (map.getSource('drift-forecast') as maplibregl.GeoJSONSource).setData(forecastPts);
+            
+            const spillEl = document.createElement('div');
+            spillEl.innerHTML = 'SAR Spill Boundary';
+            Object.assign(spillEl.style, {
+              background: 'rgba(246, 166, 35, 0.15)', border: '1px solid #f6a623',
+              color: '#f6a623', padding: '4px 8px', borderRadius: '4px',
+              fontFamily: 'DM Mono, monospace', fontSize: '10px',
+              backdropFilter: 'blur(4px)', pointerEvents: 'none', whiteSpace: 'nowrap'
+            });
+            const m2 = new maplibregl.Marker({ element: spillEl, anchor: 'left', offset: [15, 0] })
+              .setLngLat([res.geometry.centroid.lon, res.geometry.centroid.lat]).addTo(map);
+            customMarkersRef.current.push(m2);
+          }
+        };
+        pathAnimRef.current = requestAnimationFrame(animatePath);
+      }, 2100);
+
     } else {
+      // Fallback if no drift/origin data: just fly to the spill
       map.flyTo({
         center: [res.geometry.centroid.lon, res.geometry.centroid.lat],
         zoom: 10,
         duration: 2000,
       });
+      setTimeout(() => {
+        (map.getSource('spill-polygon') as maplibregl.GeoJSONSource).setData(polygon);
+        (map.getSource('spill-centroid') as maplibregl.GeoJSONSource).setData(centroidPt);
+        
+        const spillEl = document.createElement('div');
+        spillEl.innerHTML = 'SAR Spill Boundary';
+        Object.assign(spillEl.style, {
+          background: 'rgba(246, 166, 35, 0.15)', border: '1px solid #f6a623',
+          color: '#f6a623', padding: '4px 8px', borderRadius: '4px',
+          fontFamily: 'DM Mono, monospace', fontSize: '10px',
+          backdropFilter: 'blur(4px)', pointerEvents: 'none', whiteSpace: 'nowrap'
+        });
+        const m2 = new maplibregl.Marker({ element: spillEl, anchor: 'left', offset: [15, 0] })
+          .setLngLat([res.geometry.centroid.lon, res.geometry.centroid.lat]).addTo(map);
+        customMarkersRef.current.push(m2);
+      }, 2100);
     }
+  };
+
+  const resetForm = () => {
+    setFile(null);
+    setLat('');
+    setLon('');
+    setObsDate('');
+    setObsTime('');
+    setWindSpeed('');
+    setWindDir('');
+    setCurrSpeed('');
+    setCurrDir('');
+    setResult(null);
+    setError(null);
+    setNoOil(false);
+    clearMapLayers();
+    if (fileInput.current) fileInput.current.value = '';
   };
 
   const analyze = async () => {
@@ -502,14 +611,14 @@ export function SpillLabPage() {
       form.append('file', file);
       form.append('approx_lat', String(latN));
       form.append('approx_lon', String(lonN));
-      
+
       try {
         const isoString = new Date(`${obsDate}T${obsTime}:00Z`).toISOString();
         form.append('observation_time', isoString);
       } catch (e) {
         // Fallback or ignore if invalid
       }
-      
+
       if (windSpeed) form.append('wind_speed_ms', windSpeed);
       if (windDir) form.append('wind_dir_from', windDir);
       if (currSpeed) form.append('current_speed_ms', currSpeed);
@@ -523,7 +632,7 @@ export function SpillLabPage() {
 
       if (!resp.ok) {
         let detail = `Server error (${resp.status})`;
-        try { const b = await resp.json(); detail = b.detail ?? detail; } catch {}
+        try { const b = await resp.json(); detail = b.detail ?? detail; } catch { }
         throw new Error(detail);
       }
 
@@ -585,36 +694,212 @@ export function SpillLabPage() {
         </div>
       )}
 
-      {/* Toggle button */}
-      <button
-        onClick={() => setPanelOpen(!panelOpen)}
+      {/* Floating Oil Spill Detection Button & Glassmorphed Popout below Navigation Panel */}
+      <div
         style={{
-          position: 'absolute', top: 14, left: panelOpen ? 374 : 14, zIndex: 5,
-          background: '#0a2840e8', border: '1px solid #357395', borderRadius: 6,
-          color: '#c7edf6', padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-          fontFamily: 'DM Mono, monospace', transition: 'left 0.3s',
+          position: 'absolute',
+          top: 110,
+          right: 10,
+          zIndex: 15,
+          display: 'flex',
+          alignItems: 'flex-start',
+          flexDirection: 'row-reverse',
+          pointerEvents: 'none',
         }}
       >
-        {panelOpen ? '◀ Hide' : '▶ SpillLab'}
-      </button>
+        {/* Small button below Navigation Panel */}
+        <button
+          onMouseEnter={() => setSpillBoxHovered(true)}
+          onMouseLeave={() => setSpillBoxHovered(false)}
+          style={{
+            pointerEvents: 'auto',
+            width: 30,
+            height: 30,
+            borderRadius: 6,
+            border: spillBoxHovered
+              ? '1px solid rgba(111, 202, 214, 0.5)'
+              : '1px solid rgba(111, 202, 214, 0.2)',
+            background: spillBoxHovered
+              ? 'rgba(13, 38, 56, 0.65)'
+              : 'rgba(13, 38, 56, 0.4)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.15)',
+            color: '#73d5e0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            padding: 0,
+            transition: 'all 0.2s ease',
+            position: 'relative',
+          }}
+          title="Oil Spill Detected Info"
+        >
+          <Droplet
+            size={16}
+            color="#73d5e0"
+            fill={result ? 'rgba(115, 213, 224, 0.35)' : 'none'}
+          />
+          {result && (
+            <span
+              style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: '#73d5e0',
+                boxShadow: '0 0 6px #73d5e0',
+              }}
+            />
+          )}
+        </button>
+
+        {/* Glassmorphed Oil Spill Detected Box */}
+        <div
+          style={{
+            pointerEvents: 'none',
+            marginRight: 10,
+            width: 320,
+            background: 'rgba(13, 38, 56, 0.4)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: '1px solid rgba(111, 202, 214, 0.2)',
+            borderRadius: 8,
+            padding: 16,
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+            opacity: spillBoxHovered ? 1 : 0,
+            transform: spillBoxHovered ? 'translateX(0) scale(1)' : 'translateX(10px) scale(0.96)',
+            transition: 'opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+            transformOrigin: 'top right',
+          }}
+        >
+          {result ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{
+                  background: 'rgba(111, 202, 214, 0.1)',
+                  border: '1px solid rgba(111, 202, 214, 0.25)',
+                  padding: 6,
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                  <Droplet size={18} color="#73d5e0" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15, color: '#e8f7fa', fontWeight: 700 }}>Oil Spill Detected</h3>
+                  <span style={{ font: '10px "DM Mono"', color: '#76aabd' }}>{result.spill_id}</span>
+                </div>
+              </div>
+
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 10px',
+              }}>
+                {[
+                  ['Confidence', `${Math.round(result.segmentation_confidence * 100)}%`],
+                  ['Area', `${result.geometry.area_km2} km²`],
+                  ['Perimeter', `${result.geometry.perimeter_km} km`],
+                  ['Orientation', `${result.geometry.orientation_degrees}°`],
+                  ['Centroid Lat', result.geometry.centroid.lat.toFixed(5)],
+                  ['Centroid Lon', result.geometry.centroid.lon.toFixed(5)],
+                ].map(([label, value]) => (
+                  <div key={label} style={{
+                    background: 'rgba(8, 29, 43, 0.5)',
+                    border: '1px solid rgba(111, 202, 214, 0.12)',
+                    borderRadius: 5,
+                    padding: '7px 9px',
+                  }}>
+                    <span style={{ font: '9px "DM Mono"', color: '#7aa0af', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
+                    <strong style={{ display: 'block', fontSize: 14, color: '#d9f0f4', marginTop: 2, fontWeight: 700 }}>{value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{
+                marginTop: 12, padding: '8px 10px',
+                background: 'rgba(115, 213, 224, 0.05)',
+                border: '1px dashed rgba(115, 213, 224, 0.3)',
+                borderRadius: 5, font: '10px "DM Mono"', color: '#73d5e0',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <MapPin size={12} /> Spill polygon plotted on the map
+              </div>
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '10px 4px' }}>
+              <div style={{
+                display: 'inline-flex',
+                background: 'rgba(115, 213, 224, 0.1)',
+                border: '1px solid rgba(111, 202, 214, 0.2)',
+                padding: 8,
+                borderRadius: '50%',
+                marginBottom: 8,
+              }}>
+                <Droplet size={20} color="#73d5e0" />
+              </div>
+              <h4 style={{ margin: '0 0 6px', fontSize: 14, color: '#e8f7fa' }}>No Active Spill Detected</h4>
+              <p style={{ margin: 0, fontSize: 11, color: '#7aa0af', lineHeight: 1.4 }}>
+                Upload a SAR image and click <strong>Analyze Image</strong> to detect oil spill boundaries, area, perimeter, and drift tracks.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Open button (visible only when panel is closed) */}
+      {!panelOpen && (
+        <button
+          onClick={() => setPanelOpen(true)}
+          style={{
+            position: 'absolute', top: 20, left: 20, zIndex: 5,
+            background: 'rgba(10, 40, 64, 0.9)', border: '1px solid #357395', borderRadius: 6,
+            color: '#c7edf6', padding: '8px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(4px)'
+          }}
+          title="Open Spill Lab"
+        >
+          <PanelLeftOpen size={20} />
+        </button>
+      )}
 
       {/* Input panel */}
       {panelOpen && (
         <div style={{
           position: 'absolute', top: 0, left: 0, width: 360, height: '100%',
-          background: '#071827f0', borderRight: '1px solid #1b3445',
+          background: 'rgba(7, 24, 39, 0.35)', borderRight: '1px solid rgba(27, 52, 69, 0.5)',
           padding: '20px 18px', overflowY: 'auto', zIndex: 4,
-          backdropFilter: 'blur(12px)', display: 'flex', flexDirection: 'column', gap: 14,
+          backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', display: 'flex', flexDirection: 'column', gap: 14,
         }}>
-          <div>
-            <span style={{ font: '10px "DM Mono"', color: '#76aabd', letterSpacing: '0.15em' }}>SPILL LAB</span>
-            <h2 style={{ margin: '6px 0 4px', fontSize: 22, letterSpacing: '-0.03em' }}>Detection Test</h2>
-            <p style={{ fontSize: 12, color: '#8ba4b1', margin: 0 }}>Upload a SAR image and set the observation coordinates. The U-Net model will segment oil spills and plot them on the map.</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <span style={{ font: '10px "DM Mono"', color: '#76aabd', letterSpacing: '0.15em' }}>SPILL LAB</span>
+              <h2 style={{ margin: '6px 0 0', fontSize: 22, letterSpacing: '-0.03em' }}>Detection Test</h2>
+            </div>
+            <button
+              onClick={() => setPanelOpen(false)}
+              style={{
+                background: 'transparent', border: 'none', color: '#76aabd', cursor: 'pointer',
+                padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'color 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#c7edf6'}
+              onMouseLeave={(e) => e.currentTarget.style.color = '#76aabd'}
+              title="Hide panel"
+            >
+              <PanelLeftClose size={20} />
+            </button>
           </div>
 
           {/* Image upload */}
           <div style={{
-            background: '#0d2638', border: '1px solid #29475a', borderRadius: 8, padding: 16,
+            background: 'rgba(13, 38, 56, 0.4)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(111, 202, 214, 0.15)', boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)',
+            borderRadius: 8, padding: 16,
           }}>
             <label style={{ font: '10px "DM Mono"', color: '#7aa0af', letterSpacing: '0.06em' }}>SAR IMAGE</label>
             <input
@@ -627,13 +912,14 @@ export function SpillLabPage() {
             <button
               onClick={() => fileInput.current?.click()}
               style={{
-                display: 'block', width: '100%', marginTop: 8,
-                border: '1px dashed #3a6a7e', background: 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                width: '100%', marginTop: 8,
+                border: '1px dashed rgba(115, 213, 224, 0.4)', background: 'rgba(115, 213, 224, 0.05)',
                 color: '#73d5e0', padding: '14px 0', borderRadius: 6,
                 cursor: 'pointer', fontSize: 12, fontWeight: 700,
               }}
             >
-              {file ? `📎 ${file.name}` : '+ Select or drop SAR image'}
+              {file ? file.name : '+ Select or drop SAR image'}
             </button>
             {file && (
               <p style={{ font: '10px "DM Mono"', color: '#68d7a7', margin: '6px 0 0' }}>
@@ -644,7 +930,9 @@ export function SpillLabPage() {
 
           {/* Coordinates */}
           <div style={{
-            background: '#0d2638', border: '1px solid #29475a', borderRadius: 8, padding: 16,
+            background: 'rgba(13, 38, 56, 0.4)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(111, 202, 214, 0.15)', boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)',
+            borderRadius: 8, padding: 16,
             display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
           }}>
             <div>
@@ -680,7 +968,9 @@ export function SpillLabPage() {
 
           {/* Time & Date */}
           <div style={{
-            background: '#0d2638', border: '1px solid #29475a', borderRadius: 8, padding: 16,
+            background: 'rgba(13, 38, 56, 0.4)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(111, 202, 214, 0.15)', boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)',
+            borderRadius: 8, padding: 16,
             display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
           }}>
             <div>
@@ -713,7 +1003,9 @@ export function SpillLabPage() {
 
           {/* Metocean Conditions */}
           <div style={{
-            background: '#0d2638', border: '1px solid #29475a', borderRadius: 8, padding: 16,
+            background: 'rgba(13, 38, 56, 0.4)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(111, 202, 214, 0.15)', boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)',
+            borderRadius: 8, padding: 16,
             display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
           }}>
             <p style={{ gridColumn: '1/-1', font: '10px "DM Mono"', color: '#7aa0af', margin: '0 0 4px', letterSpacing: '0.06em' }}>
@@ -765,21 +1057,41 @@ export function SpillLabPage() {
             </div>
           </div>
 
-          {/* Analyze button */}
-          <button
-            onClick={analyze}
-            disabled={!validInput || loading}
-            style={{
-              width: '100%', padding: '13px 0', borderRadius: 7,
-              border: validInput && !loading ? '1px solid #6fcad6' : '1px solid #29475a',
-              background: validInput && !loading ? '#77cfda' : '#1a3344',
-              color: validInput && !loading ? '#041523' : '#5c7f8e',
-              fontSize: 13, fontWeight: 800, cursor: validInput && !loading ? 'pointer' : 'not-allowed',
-              letterSpacing: '0.02em',
-            }}
-          >
-            {loading ? '⏳ Running U-Net inference…' : '🛰️ Analyze Image'}
-          </button>
+          {/* Action buttons */}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={resetForm}
+              disabled={loading}
+              style={{
+                width: '30%', padding: '13px 0', borderRadius: 7,
+                border: '1px solid #29475a',
+                background: 'rgba(13, 38, 56, 0.4)',
+                color: '#7aa0af',
+                fontSize: 13, fontWeight: 800, cursor: loading ? 'not-allowed' : 'pointer',
+                letterSpacing: '0.02em',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.2s',
+              }}
+            >
+              Clear
+            </button>
+            <button
+              onClick={analyze}
+              disabled={!validInput || loading}
+              style={{
+                flex: 1, padding: '13px 0', borderRadius: 7,
+                border: validInput && !loading ? '1px solid #6fcad6' : '1px solid #29475a',
+                background: validInput && !loading ? '#77cfda' : '#1a3344',
+                color: validInput && !loading ? '#041523' : '#5c7f8e',
+                fontSize: 13, fontWeight: 800, cursor: validInput && !loading ? 'pointer' : 'not-allowed',
+                letterSpacing: '0.02em',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              {loading ? <Activity size={16} /> : <ScanSearch size={16} />}
+              {loading ? 'Running U-Net inference…' : 'Analyze Image'}
+            </button>
+          </div>
 
           {/* Error */}
           {error && (
@@ -805,7 +1117,9 @@ export function SpillLabPage() {
               background: '#382913', border: '1px solid #755a34', borderRadius: 8,
               padding: '18px 16px', textAlign: 'center',
             }}>
-              <div style={{ fontSize: 36, marginBottom: 8 }}>🌊</div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                <Waves size={36} color="#ffce83" />
+              </div>
               <h3 style={{ margin: '0 0 6px', fontSize: 16, color: '#ffce83' }}>No Oil Spill Detected</h3>
               <p style={{ fontSize: 12, color: '#c4a46e', margin: 0 }}>
                 The U-Net model did not identify significant oil spill features in the provided image. This may be clean water, a look-alike, or a non-SAR image.
@@ -813,46 +1127,7 @@ export function SpillLabPage() {
             </div>
           )}
 
-          {/* Detection results */}
-          {result && (
-            <div style={{
-              background: '#103525', border: '1px solid #39745a', borderRadius: 8,
-              padding: '16px 14px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <div style={{ fontSize: 20 }}>🛢️</div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 15, color: '#99e2b8' }}>Oil Spill Detected</h3>
-                  <span style={{ font: '9px "DM Mono"', color: '#6db89a' }}>{result.spill_id}</span>
-                </div>
-              </div>
 
-              <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 14px',
-              }}>
-                {[
-                  ['Confidence', `${Math.round(result.segmentation_confidence * 100)}%`],
-                  ['Area', `${result.geometry.area_km2} km²`],
-                  ['Perimeter', `${result.geometry.perimeter_km} km`],
-                  ['Orientation', `${result.geometry.orientation_degrees}°`],
-                  ['Centroid Lat', result.geometry.centroid.lat.toFixed(5)],
-                  ['Centroid Lon', result.geometry.centroid.lon.toFixed(5)],
-                ].map(([label, value]) => (
-                  <div key={label}>
-                    <span style={{ font: '9px "DM Mono"', color: '#6db89a', letterSpacing: '0.08em' }}>{label}</span>
-                    <strong style={{ display: 'block', fontSize: 16, color: '#e8fff0', marginTop: 2 }}>{value}</strong>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{
-                marginTop: 12, padding: '8px 10px', background: '#0a2e1f',
-                borderRadius: 5, font: '10px "DM Mono"', color: '#7cc8a5',
-              }}>
-                📍 Spill polygon plotted on the map
-              </div>
-            </div>
-          )}
 
           {/* Suspects (Task 5 Attribution) */}
           {result && result.ranked_vessels && (
@@ -861,7 +1136,7 @@ export function SpillLabPage() {
               padding: '16px 14px',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <div style={{ fontSize: 20 }}>🚢</div>
+                <div><Ship size={20} color="#d2a8ff" /></div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: 15, color: '#d2a8ff' }}>AIS Suspects</h3>
                   <span style={{ font: '9px "DM Mono"', color: '#9d75d0' }}>
@@ -880,71 +1155,41 @@ export function SpillLabPage() {
                     .sort((a, b) => b.attribution_score - a.attribution_score)
                     .slice(0, 5)
                     .map((v, i) => (
-                    <div key={v.mmsi} style={{
-                      background: '#2c2242', border: '1px solid #5a417e',
-                      borderRadius: 6, padding: '10px',
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <strong style={{ color: '#f0e6ff', fontSize: 14 }}>{v.vessel_name}</strong>
-                        <span style={{
-                          background: v.confidence === 'HIGH' ? '#ff3d2e' : v.confidence === 'MEDIUM' ? '#f6a623' : '#6fcad6',
-                          color: '#000', padding: '2px 6px', borderRadius: 10,
-                          fontSize: 10, fontWeight: 'bold'
-                        }}>
-                          {(v.attribution_score * 100).toFixed(0)}% MATCH
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#b99be6', font: '11px "DM Mono"' }}>
-                        <span>Type: {v.vessel_type}</span>
-                        <span>MMSI: {v.mmsi}</span>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-                        <div style={{ background: '#1c162b', padding: 6, borderRadius: 4 }}>
-                          <div style={{ fontSize: 9, color: '#8867b3', marginBottom: 2 }}>CPA Distance</div>
-                          <div style={{ color: '#d2a8ff', fontSize: 12 }}>{v.evidence.cpa_distance_km.toFixed(1)} km</div>
+                      <div key={v.mmsi} style={{
+                        background: '#2c2242', border: '1px solid #5a417e',
+                        borderRadius: 6, padding: '10px',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <strong style={{ color: '#f0e6ff', fontSize: 14 }}>{v.vessel_name}</strong>
+                          <span style={{
+                            background: v.confidence === 'HIGH' ? '#ff3d2e' : v.confidence === 'MEDIUM' ? '#f6a623' : '#6fcad6',
+                            color: '#000', padding: '2px 6px', borderRadius: 10,
+                            fontSize: 10, fontWeight: 'bold'
+                          }}>
+                            {(v.attribution_score * 100).toFixed(0)}% MATCH
+                          </span>
                         </div>
-                        <div style={{ background: '#1c162b', padding: 6, borderRadius: 4 }}>
-                          <div style={{ fontSize: 9, color: '#8867b3', marginBottom: 2 }}>Trajectory Match</div>
-                          <div style={{ color: '#d2a8ff', fontSize: 12 }}>{v.evidence.trajectory_match}</div>
+                        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#b99be6', font: '11px "DM Mono"' }}>
+                          <span>Type: {v.vessel_type}</span>
+                          <span>MMSI: {v.mmsi}</span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                          <div style={{ background: '#1c162b', padding: 6, borderRadius: 4 }}>
+                            <div style={{ fontSize: 9, color: '#8867b3', marginBottom: 2 }}>CPA Distance</div>
+                            <div style={{ color: '#d2a8ff', fontSize: 12 }}>{v.evidence.cpa_distance_km.toFixed(1)} km</div>
+                          </div>
+                          <div style={{ background: '#1c162b', padding: 6, borderRadius: 4 }}>
+                            <div style={{ fontSize: 9, color: '#8867b3', marginBottom: 2 }}>Trajectory Match</div>
+                            <div style={{ color: '#d2a8ff', fontSize: 12 }}>{v.evidence.trajectory_match}</div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* Map legend */}
-          <div style={{
-            marginTop: 'auto', padding: '10px 0', borderTop: '1px solid #20394a',
-            font: '9px "DM Mono"', color: '#6f8c9a',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#73d5e0', display: 'inline-block' }} />
-              Click location
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f6a623', display: 'inline-block' }} />
-              Spill boundary
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff3d2e', display: 'inline-block' }} />
-              Spill centroid
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff766b', display: 'inline-block', opacity: 0.5 }} />
-              Hindcast Origin (where it started)
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#91dce8', display: 'inline-block' }} />
-              Drift trajectory
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f5c542', display: 'inline-block' }} />
-              Vessel AIS trails (animated)
-            </div>
-          </div>
         </div>
       )}
     </div>
