@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
-import { ScanSearch, Activity, Waves, Droplet, MapPin, Ship, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ScanSearch, Activity, Waves, Droplet, MapPin, Ship, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -149,6 +149,8 @@ export function SpillLabPage() {
   const [noOil, setNoOil] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [spillBoxHovered, setSpillBoxHovered] = useState(false);
+  const [suspectsOpen, setSuspectsOpen] = useState(false);
+
 
   // Initialize map
   useEffect(() => {
@@ -642,9 +644,13 @@ export function SpillLabPage() {
         setResult(data);
         setNoOil(false);
         drawSpillOnMap(data);
+        if (data.ranked_vessels && data.ranked_vessels.length > 0) {
+          setSuspectsOpen(true);
+        }
       } else {
         setNoOil(true);
         setResult(null);
+        setSuspectsOpen(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed.');
@@ -652,6 +658,72 @@ export function SpillLabPage() {
       setLoading(false);
     }
   };
+
+  const handleFocusVessel = (v: NonNullable<AnalysisResult['ranked_vessels']>[number]) => {
+    if (!mapRef.current || !v.track_history || v.track_history.length === 0) return;
+    const lastPt = v.track_history[v.track_history.length - 1];
+    mapRef.current.flyTo({
+      center: [lastPt.location.lon, lastPt.location.lat],
+      zoom: Math.max(mapRef.current.getZoom(), 10),
+      duration: 1200,
+    });
+  };
+
+  const getSuspectTierStyle = (v: NonNullable<AnalysisResult['ranked_vessels']>[number]) => {
+    const isHigh = v.confidence === 'HIGH' || v.attribution_score >= 0.6;
+    const isMed = !isHigh && (v.confidence === 'MEDIUM' || v.attribution_score >= 0.35);
+
+    if (isHigh) {
+      return {
+        cardBg: 'rgba(239, 68, 68, 0.09)',
+        cardBorder: '1px solid rgba(239, 68, 68, 0.35)',
+        cardShadow: '0 4px 18px rgba(239, 68, 68, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+        nameColor: '#fff1f1',
+        metaColor: '#fca5a5',
+        badgeBg: 'rgba(239, 68, 68, 0.22)',
+        badgeBorder: '1px solid rgba(239, 68, 68, 0.55)',
+        badgeText: '#ff6b6b',
+        chipBg: 'rgba(239, 68, 68, 0.08)',
+        chipBorder: '1px solid rgba(239, 68, 68, 0.22)',
+        chipLabel: '#f87171',
+        chipValue: '#fecaca',
+        accentDot: '#ff4d4d',
+      };
+    }
+    if (isMed) {
+      return {
+        cardBg: 'rgba(245, 158, 11, 0.09)',
+        cardBorder: '1px solid rgba(245, 158, 11, 0.32)',
+        cardShadow: '0 4px 18px rgba(245, 158, 11, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+        nameColor: '#fffbeb',
+        metaColor: '#fde68a',
+        badgeBg: 'rgba(245, 158, 11, 0.20)',
+        badgeBorder: '1px solid rgba(245, 158, 11, 0.50)',
+        badgeText: '#fbbf24',
+        chipBg: 'rgba(245, 158, 11, 0.07)',
+        chipBorder: '1px solid rgba(245, 158, 11, 0.20)',
+        chipLabel: '#fbbf24',
+        chipValue: '#fef3c7',
+        accentDot: '#f59e0b',
+      };
+    }
+    return {
+      cardBg: 'rgba(56, 189, 248, 0.08)',
+      cardBorder: '1px solid rgba(56, 189, 248, 0.25)',
+      cardShadow: '0 4px 18px rgba(56, 189, 248, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+      nameColor: '#f0f9ff',
+      metaColor: '#bae6fd',
+      badgeBg: 'rgba(56, 189, 248, 0.18)',
+      badgeBorder: '1px solid rgba(56, 189, 248, 0.42)',
+      badgeText: '#38bdf8',
+      chipBg: 'rgba(56, 189, 248, 0.06)',
+      chipBorder: '1px solid rgba(56, 189, 248, 0.18)',
+      chipLabel: '#38bdf8',
+      chipValue: '#e0f2fe',
+      accentDot: '#0ea5e9',
+    };
+  };
+
 
   const validInput = file && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))
     && Math.abs(Number(lat)) <= 90 && Math.abs(Number(lon)) <= 180;
@@ -847,6 +919,333 @@ export function SpillLabPage() {
               </p>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Floating Possible Suspects Button & Glassmorphic Suspects Panel */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 148,
+          right: 10,
+          zIndex: 14,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          pointerEvents: 'none',
+        }}
+      >
+        <button
+          onClick={() => setSuspectsOpen((prev) => !prev)}
+          style={{
+            pointerEvents: 'auto',
+            height: 32,
+            padding: '0 13px',
+            borderRadius: 7,
+            border: suspectsOpen
+              ? '1px solid rgba(115, 213, 224, 0.7)'
+              : '1px solid rgba(111, 202, 214, 0.28)',
+            background: suspectsOpen
+              ? 'rgba(12, 38, 58, 0.88)'
+              : 'rgba(10, 30, 48, 0.58)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            boxShadow: suspectsOpen
+              ? '0 6px 20px rgba(0, 0, 0, 0.35), 0 0 14px rgba(115, 213, 224, 0.28)'
+              : '0 4px 15px rgba(0, 0, 0, 0.2)',
+            color: '#e0f4f7',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            cursor: 'pointer',
+            transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: '0.02em',
+          }}
+          title="Toggle Possible Suspects"
+        >
+          <Ship size={15} color="#73d5e0" />
+          <span>Possible Suspects</span>
+          {result?.ranked_vessels && result.ranked_vessels.length > 0 && (
+            <span
+              style={{
+                background: 'rgba(239, 68, 68, 0.25)',
+                color: '#ff6b6b',
+                border: '1px solid rgba(239, 68, 68, 0.45)',
+                padding: '1px 6px',
+                borderRadius: 9,
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: '"DM Mono", monospace',
+              }}
+            >
+              {result.ranked_vessels.length}
+            </span>
+          )}
+        </button>
+
+        {/* Completely Glassmorphic Suspects Box */}
+        <div
+          style={{
+            pointerEvents: suspectsOpen ? 'auto' : 'none',
+            marginTop: 8,
+            width: 370,
+            maxHeight: 'calc(100vh - 200px)',
+            background: 'rgba(8, 24, 38, 0.82)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid rgba(115, 213, 224, 0.22)',
+            borderRadius: 10,
+            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            opacity: suspectsOpen ? 1 : 0,
+            transform: suspectsOpen ? 'translateY(0) scale(1)' : 'translateY(-10px) scale(0.96)',
+            transition: 'opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+            transformOrigin: 'top right',
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              padding: '12px 14px 10px',
+              borderBottom: '1px solid rgba(115, 213, 224, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(255, 255, 255, 0.02)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <div
+                style={{
+                  background: 'rgba(115, 213, 224, 0.12)',
+                  border: '1px solid rgba(115, 213, 224, 0.28)',
+                  padding: 5,
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ship size={16} color="#73d5e0" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 14, color: '#e0f4f7', fontWeight: 700, letterSpacing: '0.02em' }}>
+                    AIS Suspects
+                  </h3>
+                  {result?.ranked_vessels && result.ranked_vessels.length > 0 && (
+                    <span
+                      style={{
+                        fontFamily: '"DM Mono", monospace',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#73d5e0',
+                        background: 'rgba(115, 213, 224, 0.14)',
+                        border: '1px solid rgba(115, 213, 224, 0.28)',
+                        padding: '1px 6px',
+                        borderRadius: 8,
+                      }}
+                    >
+                      {result.ranked_vessels.length} found
+                    </span>
+                  )}
+                </div>
+                <span style={{ font: '10px "DM Mono", monospace', color: '#76aabd', display: 'block', marginTop: 1 }}>
+                  {result?.ranked_vessels && result.ranked_vessels.length > 5
+                    ? 'Top 5 ranked by spatiotemporal score'
+                    : 'Correlated vessel intelligence'}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSuspectsOpen(false)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: 5,
+                color: '#76aabd',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.18s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#e0f4f7';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#76aabd';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+              }}
+              title="Close suspects panel"
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div
+            className="glass-scroll"
+            style={{
+              padding: '12px 14px 14px',
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            {!result ? (
+              <div style={{ textAlign: 'center', padding: '22px 10px' }}>
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    background: 'rgba(115, 213, 224, 0.08)',
+                    border: '1px solid rgba(111, 202, 214, 0.2)',
+                    padding: 9,
+                    borderRadius: '50%',
+                    marginBottom: 8,
+                  }}
+                >
+                  <Ship size={20} color="#73d5e0" />
+                </div>
+                <h4 style={{ margin: '0 0 5px', fontSize: 13, color: '#e8f7fa', fontWeight: 600 }}>
+                  No Suspects Analyzed Yet
+                </h4>
+                <p style={{ margin: 0, fontSize: 11, color: '#7aa0af', lineHeight: 1.45 }}>
+                  Upload a SAR image and click <strong>Analyze Image</strong> to cross-correlate AIS vessel tracks with the spill envelope.
+                </p>
+              </div>
+            ) : !result.ranked_vessels || result.ranked_vessels.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '18px 10px' }}>
+                <p style={{ fontSize: 12, color: '#7aa0af', margin: 0 }}>
+                  No vessels matched the spatiotemporal envelope for this incident.
+                </p>
+              </div>
+            ) : (
+              [...result.ranked_vessels]
+                .sort((a, b) => b.attribution_score - a.attribution_score)
+                .slice(0, 5)
+                .map((v) => {
+                  const tier = getSuspectTierStyle(v);
+                  const matchPercent = Math.round(v.attribution_score * 100);
+                  return (
+                    <div
+                      key={v.mmsi}
+                      onClick={() => handleFocusVessel(v)}
+                      style={{
+                        background: tier.cardBg,
+                        backdropFilter: 'blur(14px)',
+                        WebkitBackdropFilter: 'blur(14px)',
+                        border: tier.cardBorder,
+                        boxShadow: tier.cardShadow,
+                        borderRadius: 8,
+                        padding: '11px 12px',
+                        cursor: v.track_history?.length ? 'pointer' : 'default',
+                        transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.borderColor = tier.accentDot;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.border = tier.cardBorder;
+                      }}
+                      title={v.track_history?.length ? 'Click to focus vessel track on map' : undefined}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: '50%',
+                              background: tier.accentDot,
+                              boxShadow: `0 0 6px ${tier.accentDot}`,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <strong style={{ color: tier.nameColor, fontSize: 13, letterSpacing: '0.02em', fontWeight: 700 }}>
+                            {v.vessel_name}
+                          </strong>
+                        </div>
+                        <span
+                          style={{
+                            background: tier.badgeBg,
+                            border: tier.badgeBorder,
+                            color: tier.badgeText,
+                            padding: '2px 7px',
+                            borderRadius: 10,
+                            fontSize: 10,
+                            fontWeight: 800,
+                            fontFamily: '"DM Mono", monospace',
+                            letterSpacing: '0.04em',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {matchPercent}% MATCH
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 12,
+                          fontSize: 11,
+                          color: tier.metaColor,
+                          fontFamily: '"DM Mono", monospace',
+                          marginBottom: 8,
+                        }}
+                      >
+                        <span>Type: {v.vessel_type || 'Unknown'}</span>
+                        <span>MMSI: {v.mmsi}</span>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div
+                          style={{
+                            background: tier.chipBg,
+                            border: tier.chipBorder,
+                            borderRadius: 5,
+                            padding: '6px 8px',
+                          }}
+                        >
+                          <div style={{ fontSize: 9, color: tier.chipLabel, fontFamily: '"DM Mono", monospace', letterSpacing: '0.06em', marginBottom: 2 }}>
+                            CPA DISTANCE
+                          </div>
+                          <div style={{ color: tier.chipValue, fontSize: 12, fontWeight: 700, fontFamily: '"DM Mono", monospace' }}>
+                            {v.evidence.cpa_distance_km.toFixed(1)} km
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            background: tier.chipBg,
+                            border: tier.chipBorder,
+                            borderRadius: 5,
+                            padding: '6px 8px',
+                          }}
+                        >
+                          <div style={{ fontSize: 9, color: tier.chipLabel, fontFamily: '"DM Mono", monospace', letterSpacing: '0.06em', marginBottom: 2 }}>
+                            TRAJECTORY MATCH
+                          </div>
+                          <div style={{ color: tier.chipValue, fontSize: 12, fontWeight: 700, fontFamily: '"DM Mono", monospace' }}>
+                            {v.evidence.trajectory_match}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+            )}
+          </div>
         </div>
       </div>
 
@@ -1128,67 +1527,6 @@ export function SpillLabPage() {
           )}
 
 
-
-          {/* Suspects (Task 5 Attribution) */}
-          {result && result.ranked_vessels && (
-            <div style={{
-              background: '#1c162b', border: '1px solid #4a3368', borderRadius: 8,
-              padding: '16px 14px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <div><Ship size={20} color="#d2a8ff" /></div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 15, color: '#d2a8ff' }}>AIS Suspects</h3>
-                  <span style={{ font: '9px "DM Mono"', color: '#9d75d0' }}>
-                    {result.ranked_vessels.length} found {result.ranked_vessels.length > 5 && '(Top 5 shown)'}
-                  </span>
-                </div>
-              </div>
-
-              {result.ranked_vessels.length === 0 ? (
-                <p style={{ fontSize: 12, color: '#9d75d0', margin: 0 }}>
-                  No vessels matched the spatiotemporal envelope.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {[...result.ranked_vessels]
-                    .sort((a, b) => b.attribution_score - a.attribution_score)
-                    .slice(0, 5)
-                    .map((v, i) => (
-                      <div key={v.mmsi} style={{
-                        background: '#2c2242', border: '1px solid #5a417e',
-                        borderRadius: 6, padding: '10px',
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <strong style={{ color: '#f0e6ff', fontSize: 14 }}>{v.vessel_name}</strong>
-                          <span style={{
-                            background: v.confidence === 'HIGH' ? '#ff3d2e' : v.confidence === 'MEDIUM' ? '#f6a623' : '#6fcad6',
-                            color: '#000', padding: '2px 6px', borderRadius: 10,
-                            fontSize: 10, fontWeight: 'bold'
-                          }}>
-                            {(v.attribution_score * 100).toFixed(0)}% MATCH
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#b99be6', font: '11px "DM Mono"' }}>
-                          <span>Type: {v.vessel_type}</span>
-                          <span>MMSI: {v.mmsi}</span>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-                          <div style={{ background: '#1c162b', padding: 6, borderRadius: 4 }}>
-                            <div style={{ fontSize: 9, color: '#8867b3', marginBottom: 2 }}>CPA Distance</div>
-                            <div style={{ color: '#d2a8ff', fontSize: 12 }}>{v.evidence.cpa_distance_km.toFixed(1)} km</div>
-                          </div>
-                          <div style={{ background: '#1c162b', padding: 6, borderRadius: 4 }}>
-                            <div style={{ fontSize: 9, color: '#8867b3', marginBottom: 2 }}>Trajectory Match</div>
-                            <div style={{ color: '#d2a8ff', fontSize: 12 }}>{v.evidence.trajectory_match}</div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          )}
 
         </div>
       )}
