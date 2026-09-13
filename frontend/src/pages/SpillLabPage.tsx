@@ -253,6 +253,7 @@ export function SpillLabPage() {
     // 1. Draw Hindcast Origin (Pixel-based circle so it never vanishes at global zoom)
     let originPt: GeoJSON.Feature<GeoJSON.Point> | null = null;
     let driftPathCoords: number[][] = [];
+    let allBoundsCoords: number[][] = [];
     let forecastPts: GeoJSON.Feature<GeoJSON.MultiPoint> | null = null;
 
     if (res.drift) {
@@ -271,10 +272,14 @@ export function SpillLabPage() {
       driftPathCoords.push([origin.centroid.lon, origin.centroid.lat]);
       driftPathCoords.push([res.geometry.centroid.lon, res.geometry.centroid.lat]);
 
+      allBoundsCoords.push([origin.centroid.lon, origin.centroid.lat]);
+      allBoundsCoords.push([res.geometry.centroid.lon, res.geometry.centroid.lat]);
+
       const fCoords: number[][] = [];
       if (res.drift.forecast_trajectory) {
         res.drift.forecast_trajectory.forEach(pt => {
           driftPathCoords.push([pt.location.lon, pt.location.lat]);
+          allBoundsCoords.push([pt.location.lon, pt.location.lat]);
           fCoords.push([pt.location.lon, pt.location.lat]);
         });
       }
@@ -422,8 +427,8 @@ export function SpillLabPage() {
         }
       });
 
-      // Include vessel coords in the bounds
-      coords.forEach(c => driftPathCoords.push(c));
+      // Include vessel coords in the bounds (NOT in driftPathCoords)
+      coords.forEach(c => allBoundsCoords.push(c));
 
       vesselAnimStates.push({
         coords,
@@ -506,7 +511,7 @@ export function SpillLabPage() {
         
         // 3. Pan out to reveal the whole path smoothly while plotting
         const bounds = new maplibregl.LngLatBounds();
-        driftPathCoords.forEach(c => bounds.extend(c as [number, number]));
+        (allBoundsCoords.length > 0 ? allBoundsCoords : driftPathCoords).forEach(c => bounds.extend(c as [number, number]));
         map.fitBounds(bounds, { padding: 80, duration: 2500 });
         
         // 4. Smooth progressive plotting of the blue line
