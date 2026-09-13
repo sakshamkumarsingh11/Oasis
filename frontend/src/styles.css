@@ -50,3 +50,27 @@ html,body,*{scrollbar-width:none;-ms-overflow-style:none}::-webkit-scrollbar{wid
   background: rgba(115, 213, 224, 0.5) !important;
 }
 
+/* Custom Glassmorphic Vessel Marker & Tooltip */
+.ship-radar-node {
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+.ship-radar-node:hover {
+  transform: scale(1.22) !important;
+}
+.vessel-glass-popup {
+  z-index: 30 !important;
+  pointer-events: none !important;
+}
+.vessel-glass-popup .maplibregl-popup-content {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+.vessel-glass-popup .maplibregl-popup-tip {
+  border-top-color: rgba(8, 24, 38, 0.92) !important;
+  border-bottom-color: rgba(8, 24, 38, 0.92) !important;
+}
+
+

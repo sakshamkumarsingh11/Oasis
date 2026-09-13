@@ -200,6 +200,8 @@ export function SpillLabPage() {
   const animFrameRef = useRef<number | null>(null);
   const pathAnimRef = useRef<number | null>(null);
   const customMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const vesselMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const vesselPopupRef = useRef<maplibregl.Popup | null>(null);
 
   const clearMapLayers = () => {
     const map = mapRef.current;
@@ -213,6 +215,12 @@ export function SpillLabPage() {
     sources.forEach(s => { if (map.getSource(s)) map.removeSource(s); });
     customMarkersRef.current.forEach(m => m.remove());
     customMarkersRef.current = [];
+    vesselMarkersRef.current.forEach(m => m.remove());
+    vesselMarkersRef.current = [];
+    if (vesselPopupRef.current) {
+      vesselPopupRef.current.remove();
+      vesselPopupRef.current = null;
+    }
     // Clean vessel trajectory layers (up to 5 vessels)
     for (let i = 0; i < 5; i++) {
       [`vessel-trail-${i}`, `vessel-trail-line-${i}`, `vessel-icon-${i}`].forEach(l => { if (map.getLayer(l)) map.removeLayer(l); });
@@ -386,8 +394,9 @@ export function SpillLabPage() {
       .slice(0, 5)
       .filter(v => v.track_history && v.track_history.length >= 2);
 
-    // For each vessel: draw dashed trail + animated icon
-    const vesselAnimStates: { coords: number[][]; progress: number; src: maplibregl.GeoJSONSource | null }[] = [];
+    // For each vessel: draw dashed trail + animated ship icon marker with MMSI hover effect
+    const vesselAnimStates: { coords: number[][]; marker: maplibregl.Marker; id: string }[] = [];
+    let activeHoveredMarker: maplibregl.Marker | null = null;
 
     topVessels.forEach((vessel, i) => {
       const coords = vessel.track_history.map(pt => [pt.location.lon, pt.location.lat]);
@@ -410,21 +419,103 @@ export function SpillLabPage() {
         }
       });
 
-      // Animated ship icon (starts at first track point)
-      map.addSource(`vessel-icon-src-${i}`, {
-        type: 'geojson',
-        data: { type: 'Feature', properties: { name: vessel.vessel_name, score: Math.round(vessel.attribution_score * 100) }, geometry: { type: 'Point', coordinates: coords[0] } }
+      // Actual ship icon marker
+      const node = document.createElement('div');
+      node.className = 'ship-radar-node';
+      node.style.cssText = `
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: rgba(8, 25, 40, 0.92);
+        border: 2px solid ${color};
+        box-shadow: 0 0 14px ${color}88, 0 4px 10px rgba(0,0,0,0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      `;
+      node.innerHTML = `
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>
+          <path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/>
+          <path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/>
+          <path d="M12 10V2"/>
+          <path d="M12 2l5 3"/>
+        </svg>
+      `;
+
+      const marker = new maplibregl.Marker({ element: node, anchor: 'center' })
+        .setLngLat(coords[0] as [number, number])
+        .addTo(map);
+
+      vesselMarkersRef.current.push(marker);
+
+      // Hover effect box with prominent MMSI number
+      node.addEventListener('mouseenter', () => {
+        activeHoveredMarker = marker;
+        vesselPopupRef.current?.remove();
+        const popup = new maplibregl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          offset: 18,
+          className: 'vessel-glass-popup'
+        })
+          .setLngLat(marker.getLngLat())
+          .setHTML(`
+            <div style="
+              background: rgba(8, 24, 38, 0.94);
+              backdrop-filter: blur(16px);
+              -webkit-backdrop-filter: blur(16px);
+              border: 1px solid ${color};
+              box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 16px ${color}55;
+              border-radius: 8px;
+              padding: 10px 13px;
+              min-width: 175px;
+              font-family: system-ui, -apple-system, sans-serif;
+              color: #e0f4f7;
+            ">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                <strong style="font-size: 13px; color: #fff; letter-spacing: 0.02em;">${vessel.vessel_name}</strong>
+                <span style="
+                  background: ${color}25;
+                  color: ${color};
+                  border: 1px solid ${color}60;
+                  padding: 1px 6px;
+                  border-radius: 6px;
+                  font-size: 9px;
+                  font-weight: 800;
+                  font-family: 'DM Mono', monospace;
+                ">${Math.round(vessel.attribution_score * 100)}% MATCH</span>
+              </div>
+
+              <div style="
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 4px;
+                padding: 4px 8px;
+                margin-bottom: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              ">
+                <span style="font-size: 9px; color: #8aaab9; font-family: 'DM Mono', monospace; letter-spacing: 0.06em;">MMSI</span>
+                <strong style="font-size: 11px; color: #73d5e0; font-family: 'DM Mono', monospace; letter-spacing: 0.08em;">${vessel.mmsi}</strong>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; font-size: 10px; color: #9bb5c2; font-family: 'DM Mono', monospace;">
+                <span>${vessel.vessel_type || 'Unknown'}</span>
+                <span>CPA: ${vessel.evidence.cpa_distance_km.toFixed(1)} km</span>
+              </div>
+            </div>
+          `)
+          .addTo(map);
+        vesselPopupRef.current = popup;
       });
-      map.addLayer({
-        id: `vessel-icon-${i}`,
-        type: 'circle',
-        source: `vessel-icon-src-${i}`,
-        paint: {
-          'circle-radius': 8,
-          'circle-color': color,
-          'circle-stroke-color': '#fff',
-          'circle-stroke-width': 2.5,
-        }
+
+      node.addEventListener('mouseleave', () => {
+        activeHoveredMarker = null;
+        vesselPopupRef.current?.remove();
+        vesselPopupRef.current = null;
       });
 
       // Include vessel coords in the bounds (NOT in driftPathCoords)
@@ -432,12 +523,12 @@ export function SpillLabPage() {
 
       vesselAnimStates.push({
         coords,
-        progress: 0,
-        src: map.getSource(`vessel-icon-src-${i}`) as maplibregl.GeoJSONSource | null,
+        marker,
+        id: vessel.mmsi,
       });
     });
 
-    // Animation loop: smoothly move each vessel dot along its track
+    // Animation loop: smoothly move each vessel ship marker along its track
     if (vesselAnimStates.length > 0) {
       const ANIM_DURATION_MS = 6000; // 6 seconds to travel the full track
       let startTime: number | null = null;
@@ -447,10 +538,9 @@ export function SpillLabPage() {
         const elapsed = timestamp - startTime;
         const t = Math.min(elapsed / ANIM_DURATION_MS, 1); // 0→1
 
-        vesselAnimStates.forEach((state, i) => {
-          const { coords } = state;
-          const src = mapRef.current?.getSource(`vessel-icon-src-${i}`) as maplibregl.GeoJSONSource | undefined;
-          if (!src || coords.length < 2) return;
+        vesselAnimStates.forEach((state) => {
+          const { coords, marker } = state;
+          if (coords.length < 2) return;
 
           // Interpolate position along the polyline
           const totalSegments = coords.length - 1;
@@ -461,11 +551,10 @@ export function SpillLabPage() {
           const lng = coords[segIndex][0] + (coords[segIndex + 1][0] - coords[segIndex][0]) * segT;
           const lat = coords[segIndex][1] + (coords[segIndex + 1][1] - coords[segIndex][1]) * segT;
 
-          src.setData({
-            type: 'Feature',
-            properties: {},
-            geometry: { type: 'Point', coordinates: [lng, lat] }
-          });
+          marker.setLngLat([lng, lat]);
+          if (vesselPopupRef.current && activeHoveredMarker === marker) {
+            vesselPopupRef.current.setLngLat([lng, lat]);
+          }
         });
 
         if (t < 1) {
@@ -985,7 +1074,7 @@ export function SpillLabPage() {
                 fontFamily: '"DM Mono", monospace',
               }}
             >
-              {result.ranked_vessels.length}
+              {Math.min(5, result.ranked_vessels.length)}
             </span>
           )}
         </button>
@@ -1055,13 +1144,13 @@ export function SpillLabPage() {
                         borderRadius: 8,
                       }}
                     >
-                      {result.ranked_vessels.length} found
+                      {Math.min(5, result.ranked_vessels.length)} found
                     </span>
                   )}
                 </div>
                 <span style={{ font: '10px "DM Mono", monospace', color: '#76aabd', display: 'block', marginTop: 1 }}>
-                  {result?.ranked_vessels && result.ranked_vessels.length > 5
-                    ? 'Top 5 ranked by spatiotemporal score'
+                  {result?.ranked_vessels && result.ranked_vessels.length > 0
+                    ? `Top ${Math.min(5, result.ranked_vessels.length)} ranked by spatiotemporal score`
                     : 'Correlated vessel intelligence'}
                 </span>
               </div>
