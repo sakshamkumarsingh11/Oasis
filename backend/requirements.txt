@@ -1,0 +1,14 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
+numpy>=1.26.0
+opencv-python-headless>=4.8.0
+shapely>=2.0.0
+scipy>=1.11.0
+httpx>=0.25.0
+reportlab>=4.1.0
+torch
+torchvision
+duckdb
+pandas

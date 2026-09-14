@@ -1,0 +1,28 @@
+venv/
+env/
+.venv/
+__pycache__/
+*.py[cod]
+.vscode/
+.idea/
+ml/datasets/
+ml/weights/*.pth
+ais dataset/
+*.zip
+*.xlsx
+.env
+*.db
+*.duckdb
+*.pt
+node_modules/
+frontend/dist/
+
+# Dev / scratch test scripts (not for production)
+test_*.py
+scratch_*.py
+update_lookalike.py
+predict_spill.py
+dummy_test_img.png
+Test Images/
+*.bak
+.rollback/
