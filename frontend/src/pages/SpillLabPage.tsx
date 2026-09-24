@@ -5,6 +5,7 @@ import * as turf from '@turf/turf';
 import { ScanSearch, Activity, Waves, Droplet, MapPin, Ship, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+const VESSEL_COLORS = ['#f5c542', '#e07bff', '#42f5a7', '#ff7b7b', '#7bc8ff'];
 
 interface AnalysisResult {
   spill_id: string;
@@ -388,7 +389,6 @@ export function SpillLabPage() {
     });
 
     // ─── VESSEL TRAJECTORY ANIMATION ───
-    const VESSEL_COLORS = ['#f5c542', '#e07bff', '#42f5a7', '#ff7b7b', '#7bc8ff'];
     const topVessels = (res.ranked_vessels || [])
       .sort((a, b) => b.attribution_score - a.attribution_score)
       .slice(0, 5)
@@ -450,73 +450,7 @@ export function SpillLabPage() {
 
       vesselMarkersRef.current.push(marker);
 
-      // Hover effect box with prominent MMSI number
-      node.addEventListener('mouseenter', () => {
-        activeHoveredMarker = marker;
-        vesselPopupRef.current?.remove();
-        const popup = new maplibregl.Popup({
-          closeButton: false,
-          closeOnClick: false,
-          offset: 18,
-          className: 'vessel-glass-popup'
-        })
-          .setLngLat(marker.getLngLat())
-          .setHTML(`
-            <div style="
-              background: rgba(8, 24, 38, 0.94);
-              backdrop-filter: blur(16px);
-              -webkit-backdrop-filter: blur(16px);
-              border: 1px solid ${color};
-              box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 16px ${color}55;
-              border-radius: 8px;
-              padding: 10px 13px;
-              min-width: 175px;
-              font-family: system-ui, -apple-system, sans-serif;
-              color: #e0f4f7;
-            ">
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
-                <strong style="font-size: 13px; color: #fff; letter-spacing: 0.02em;">${vessel.vessel_name}</strong>
-                <span style="
-                  background: ${color}25;
-                  color: ${color};
-                  border: 1px solid ${color}60;
-                  padding: 1px 6px;
-                  border-radius: 6px;
-                  font-size: 9px;
-                  font-weight: 800;
-                  font-family: 'DM Mono', monospace;
-                ">${Math.round(vessel.attribution_score * 100)}% MATCH</span>
-              </div>
-
-              <div style="
-                background: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 4px;
-                padding: 4px 8px;
-                margin-bottom: 6px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-              ">
-                <span style="font-size: 9px; color: #8aaab9; font-family: 'DM Mono', monospace; letter-spacing: 0.06em;">MMSI</span>
-                <strong style="font-size: 11px; color: #73d5e0; font-family: 'DM Mono', monospace; letter-spacing: 0.08em;">${vessel.mmsi}</strong>
-              </div>
-
-              <div style="display: flex; justify-content: space-between; font-size: 10px; color: #9bb5c2; font-family: 'DM Mono', monospace;">
-                <span>${vessel.vessel_type || 'Unknown'}</span>
-                <span>CPA: ${vessel.evidence.cpa_distance_km.toFixed(1)} km</span>
-              </div>
-            </div>
-          `)
-          .addTo(map);
-        vesselPopupRef.current = popup;
-      });
-
-      node.addEventListener('mouseleave', () => {
-        activeHoveredMarker = null;
-        vesselPopupRef.current?.remove();
-        vesselPopupRef.current = null;
-      });
+      // Removed glitchy hover effect from animated markers per user request.
 
       // Include vessel coords in the bounds (NOT in driftPathCoords)
       coords.forEach(c => allBoundsCoords.push(c));
@@ -857,6 +791,39 @@ export function SpillLabPage() {
             CONFIDENCE BREAKDOWN
           </h4>
           <DonutChart metrics={chartMetrics} overall={overallScore} />
+        </div>
+      )}
+
+      {/* Vessel Legend (Bottom Left) */}
+      {result?.ranked_vessels && result.ranked_vessels.length > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 30, left: 20, zIndex: 10,
+          background: 'rgba(8, 24, 38, 0.82)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid rgba(115, 213, 224, 0.22)', borderRadius: 8, padding: '10px 14px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)',
+          minWidth: 130
+        }}>
+          <div style={{
+            fontFamily: '"DM Mono", monospace', fontSize: 10, fontWeight: 700, color: '#73d5e0',
+            letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8, paddingBottom: 6,
+            borderBottom: '1px solid rgba(115, 213, 224, 0.15)'
+          }}>
+            Vessels
+          </div>
+          {[...result.ranked_vessels]
+            .sort((a, b) => b.attribution_score - a.attribution_score)
+            .slice(0, 5)
+            .map((v, i) => {
+              const color = VESSEL_COLORS[i % VESSEL_COLORS.length];
+              return (
+                <div key={v.mmsi} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                  <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, color, textShadow: `0 0 6px ${color}` }}>⛴</span>
+                  <span style={{ fontFamily: '"DM Mono", monospace', fontSize: 11, fontWeight: 600, color: '#c8e4ea', letterSpacing: '0.02em' }}>
+                    {v.mmsi}
+                  </span>
+                </div>
+              );
+            })}
         </div>
       )}
 

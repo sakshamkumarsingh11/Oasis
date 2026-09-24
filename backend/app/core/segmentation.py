@@ -100,7 +100,7 @@ _model = None
 _device = None
 _MODEL_LOADED = False
 
-# Search locations for the weights file
+# Local fallback paths (used only if Hugging Face download is unavailable)
 _WEIGHTS_SEARCH = [
     Path(__file__).resolve().parents[2] / "best_oil_spill_unet.pt",       # backend/
     Path(__file__).resolve().parents[3] / "best_oil_spill_unet.pt",       # project root
@@ -127,11 +127,22 @@ def _ensure_model():
         _MODEL_LOADED = True
         return
 
+    # 1. Try downloading from Hugging Face Hub (auto-cached after first run)
     weights_path = None
-    for p in _WEIGHTS_SEARCH:
-        if p.exists():
-            weights_path = p
-            break
+    try:
+        from app.core.model_downloader import download_model
+        hf_path = download_model("unet")
+        if hf_path is not None:
+            weights_path = hf_path
+    except Exception as exc:
+        logger.debug("Hugging Face download attempt failed: %s", exc)
+
+    # 2. Fallback: search local filesystem paths
+    if weights_path is None:
+        for p in _WEIGHTS_SEARCH:
+            if p.exists():
+                weights_path = p
+                break
 
     if weights_path is None:
         logger.warning("U-Net weights (best_oil_spill_unet.pt) not found — will use synthetic fallback.")

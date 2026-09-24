@@ -12,3 +12,4 @@ torch
 torchvision
 duckdb
 pandas
+huggingface_hub>=0.20.0

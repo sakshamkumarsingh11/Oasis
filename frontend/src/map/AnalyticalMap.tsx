@@ -16,6 +16,13 @@ function featureLabel(feature: maplibregl.MapGeoJSONFeature) {
   return `<strong>${title}</strong>${rows.length ? `<br/><span>${rows.join(' · ')}</span>` : '<br/><span>Demo / simulated evidence</span>'}`;
 }
 
+/* Tier color for legend ship icon dot */
+function vesselTierColor(score: number): string {
+  if (score >= 0.6) return '#ff4d4d';
+  if (score >= 0.35) return '#f59e0b';
+  return '#0ea5e9';
+}
+
 export function AnalyticalMap({ data, onPipelineStage, pipelineRunVersion = 0 }: { data: DashboardPayload; onPipelineStage?: (stage: number) => void; pipelineRunVersion?: number }) {
   const element = useRef<HTMLDivElement>(null); const mapRef = useRef<Map | null>(null); const markerElements = useRef<Record<string, HTMLElement>>({});
   const layers = useUiStore((state) => state.layers); const select = useUiStore((state) => state.selectFeature); const visualMode = useUiStore((state) => state.visualMode); const setVisualMode = useUiStore((state) => state.setVisualMode);
@@ -25,7 +32,7 @@ export function AnalyticalMap({ data, onPipelineStage, pipelineRunVersion = 0 }:
     const forecast = visualMode === 'enhanced' ? '#5eb9df' : '#4da9ba';
     const map = new maplibregl.Map({ container: element.current, style: { version: 8, sources: { satellite: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Tiles © Esri' } }, layers: [{ id: 'satellite', type: 'raster', source: 'satellite', paint: { 'raster-brightness-max': visualMode === 'enhanced' ? .74 : .68, 'raster-saturation': visualMode === 'enhanced' ? -1 : -.25, 'raster-contrast': visualMode === 'enhanced' ? .62 : .18, 'raster-brightness-min': visualMode === 'enhanced' ? .08 : 0 } }] }, center: data.incident.location, zoom: 7 });
     const markers: maplibregl.Marker[] = []; const shipMarkers: { marker: maplibregl.Marker; path: LngLat[]; node: HTMLElement }[] = []; const timers: ReturnType<typeof setTimeout>[] = [];
-    let hoverPopup: Popup | null = null; let shipPopup: Popup | null = null; let animationFrame = 0;
+    let hoverPopup: Popup | null = null; let animationFrame = 0;
     const visibility = (id: string, show: boolean) => [id, `${id}-outline`].forEach((layer) => { if (map.getLayer(layer)) map.setLayoutProperty(layer, 'visibility', show ? 'visible' : 'none'); });
     map.addControl(new maplibregl.NavigationControl(), 'top-right'); map.addControl(new maplibregl.FullscreenControl(), 'top-right');
     map.on('load', () => {
@@ -48,11 +55,6 @@ export function AnalyticalMap({ data, onPipelineStage, pipelineRunVersion = 0 }:
         node.addEventListener('click', () => select(String(feature.properties.title ?? feature.properties.mmsi ?? layer))); const id = layer === 'centroid' ? 'centroid' : String(feature.properties.mmsi); markerElements.current[id] = node;
         const path = tracks.get(id); const marker = new maplibregl.Marker({ element: node, anchor: 'center' }).setLngLat(path?.[0] ?? feature.geometry.coordinates).addTo(map); markers.push(marker);
         if (path) {
-          const candidate = data.attribution.candidates.find((item) => item.vessel.mmsi === id);
-          const vesselName = candidate?.vessel.name ?? String(feature.properties.title ?? 'Candidate vessel');
-          const hoverDetails = () => { const coordinates = marker.getLngLat(); return `<strong>${vesselName}</strong><br/><span>MMSI ${id} · ${coordinates.lat.toFixed(4)}° N / ${coordinates.lng.toFixed(4)}° E<br/>Rank #${candidate?.rank ?? '—'} · Evidence score ${candidate?.score.toFixed(2) ?? '—'}</span>`; };
-          node.addEventListener('mouseenter', () => { shipPopup?.remove(); shipPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 18, className: 'intel-map-popup vessel-hover-popup' }).setLngLat(marker.getLngLat()).setHTML(hoverDetails()).addTo(map); });
-          node.addEventListener('mouseleave', () => { shipPopup?.remove(); shipPopup = null; });
           shipMarkers.push({ marker, path, node });
         }
       });
@@ -77,8 +79,35 @@ export function AnalyticalMap({ data, onPipelineStage, pipelineRunVersion = 0 }:
       } else { visibility('origin-zone', false); }
     });
     mapRef.current = map;
-    return () => { timers.forEach(clearTimeout); cancelAnimationFrame(animationFrame); hoverPopup?.remove(); shipPopup?.remove(); markers.forEach((marker) => marker.remove()); map.remove(); markerElements.current = {}; };
+    return () => { timers.forEach(clearTimeout); cancelAnimationFrame(animationFrame); hoverPopup?.remove(); markers.forEach((marker) => marker.remove()); map.remove(); markerElements.current = {}; };
   }, [data, select, visualMode, runVersion, pipelineRunVersion]);
   useEffect(() => { const map = mapRef.current; if (!map) return; Object.entries(layers).forEach(([id, shown]) => { [id, `${id}-outline`].forEach((layer) => { if (map.getLayer(layer)) map.setLayoutProperty(layer, 'visibility', shown ? 'visible' : 'none'); }); }); const centroid = markerElements.current.centroid; if (centroid) centroid.style.display = layers.centroid ? '' : 'none'; Object.entries(markerElements.current).filter(([id]) => id !== 'centroid').forEach(([, node]) => { node.style.display = layers.vessels ? '' : 'none'; }); }, [layers]);
-  return <div className={`map-frame ${visualMode}`}><div className="map" ref={element} /><div className="map-actions"><button className="map-visual-toggle" onClick={() => setVisualMode(visualMode === 'enhanced' ? 'classic' : 'enhanced')}>{visualMode === 'enhanced' ? 'Classic satellite' : 'Enhanced SAR'}</button><button className="run-pipeline-button" onClick={() => { onPipelineStage?.(0); setRunVersion((version) => version + 1); }}>Run pipeline</button></div></div>;
+
+  /* Build legend entries from candidates */
+  const legendEntries = (data?.attribution?.candidates || []).map((c) => ({
+    mmsi: c.vessel.mmsi,
+    name: c.vessel.name,
+    score: c.score,
+    color: vesselTierColor(c.score),
+  }));
+
+  return <div className={`map-frame ${visualMode}`}>
+    <div className="map" ref={element} />
+    <div className="map-actions">
+      <button className="map-visual-toggle" onClick={() => setVisualMode(visualMode === 'enhanced' ? 'classic' : 'enhanced')}>{visualMode === 'enhanced' ? 'Classic satellite' : 'Enhanced SAR'}</button>
+      <button className="run-pipeline-button" onClick={() => { onPipelineStage?.(0); setRunVersion((version) => version + 1); }}>Run pipeline</button>
+    </div>
+    {/* Vessel Legend */}
+    {legendEntries.length > 0 && (
+      <div className="vessel-legend">
+        <div className="vessel-legend-title">Vessels</div>
+        {legendEntries.map((entry) => (
+          <div key={entry.mmsi} className="vessel-legend-row">
+            <span className="vessel-legend-icon" style={{ color: entry.color, textShadow: `0 0 6px ${entry.color}` }}>⛴</span>
+            <span className="vessel-legend-mmsi">{entry.mmsi}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>;
 }

@@ -45,20 +45,35 @@ def _try_lookalike_verification(seg_result: dict, spill_mask: np.ndarray):
         config = Model2Config()
 
         # Try to load the EfficientNet-B0 checkpoint
+        # 1. Attempt download from Hugging Face Hub (auto-cached)
         model = None
-        search_paths = [
-            Path(__file__).resolve().parents[2] / "best_lookalike_model.pt",
-            Path(__file__).resolve().parents[3] / "best_lookalike_model.pt",
-            Path("best_lookalike_model.pt"),
-        ]
-        for p in search_paths:
-            if p.exists():
-                try:
-                    model = load_model(str(p), config)
-                    logger.info("Lookalike model loaded from %s", p)
-                except Exception as e:
-                    logger.warning("Failed to load lookalike model from %s: %s", p, e)
-                break
+        checkpoint_path = None
+        try:
+            from app.core.model_downloader import download_model as dl_model
+            hf_path = dl_model("lookalike")
+            if hf_path is not None:
+                checkpoint_path = hf_path
+        except Exception as exc:
+            logger.debug("HF download for lookalike failed: %s", exc)
+
+        # 2. Fallback: search local filesystem paths
+        if checkpoint_path is None:
+            search_paths = [
+                Path(__file__).resolve().parents[2] / "best_lookalike_model.pt",
+                Path(__file__).resolve().parents[3] / "best_lookalike_model.pt",
+                Path("best_lookalike_model.pt"),
+            ]
+            for p in search_paths:
+                if p.exists():
+                    checkpoint_path = p
+                    break
+
+        if checkpoint_path is not None:
+            try:
+                model = load_model(str(checkpoint_path), config)
+                logger.info("Lookalike model loaded from %s", checkpoint_path)
+            except Exception as e:
+                logger.warning("Failed to load lookalike model from %s: %s", checkpoint_path, e)
 
         # If raw_sar is a standard 8-bit/16-bit image (e.g. from a test JPEG), 
         # convert it to pseudo-dB space [-30, 0] so the physics thresholds 
