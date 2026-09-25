@@ -1,83 +1,64 @@
-# OASIS: Oil Spill Detection & Vessel Attribution
+# OASIS: Marine Oil Spill Intelligence & Vessel Attribution Platform
 
-A geospatial intelligence system for detecting marine oil spills from satellite imagery, estimating probable spill origin using environmental drift data, and identifying vessels that may be associated with the event using AIS trajectories.
-
-## 🌟 Key Features
-
-* **AI Oil Spill Segmentation**: Uses U-Net to identify oil-spill regions in Sentinel-1 SAR imagery.
-* **Lookalike Verification**: Utilizes EfficientNet-B0 to differentiate real oil spills from calm sea lookalikes.
-* **Physics Leeway Drift Engine**: Estimates probable origin (hindcast) and future drift (forecast) using real-time Metocean wind and ocean-current data.
-* **AIS Spatiotemporal Attribution**: Searches historical AIS data via DuckDB to find candidate vessels matching the hindcast path, ranking them based on behavioral evidence.
-* **Forensic PDF Reports**: Automatically generates detailed investigation reports.
+**Smart India Hackathon 2026 | Problem Statement ID: SIH26143**  
+**Organization:** National Technical Research Organisation (NTRO) / Indian Coast Guard (ICG)  
+**Framework Alignment:** National Oil Spill Disaster Contingency Plan (NOS-DCP)  
+**Team:** Team DDOS  
 
 ---
 
-## 🛠️ Technology Stack
+## 1. Executive Summary
 
-* **Backend:** FastAPI, PyTorch (U-Net, ResNet), DuckDB, OpenCV
-* **Frontend:** React, TypeScript, Vite, TailwindCSS, Mapbox/Deck.gl
-* **ML Hosting:** Hugging Face Hub (Auto-downloading weights)
+OASIS (Oil-spill Attribution & Satellite Intelligence System) is a defense-grade geospatial intelligence platform designed to detect marine hydrocarbon slicks from satellite radar imagery, trace their probable point of origin using hydrodynamic leeway physics, and identify responsible vessels through spatiotemporal AIS trajectory correlation and behavioral anomaly scoring.
 
----
-
-## 🚀 Getting Started
-
-### 1. Requirements
-* Python 3.9+
-* Node.js 18+
-* Git
-
-### 2. AIS Dataset Requirements ⚠️
-Because AIS databases are extremely large, we do not bundle the raw CSV data in this repository. 
-**Before running attribution queries, you must download the AIS data yourself:**
-1. Download historical vessel traffic data from [MarineCadastre](https://hub.marinecadastre.gov/pages/vesseltraffic).
-2. Place the downloaded `.csv` files inside the `ais dataset/` directory at the root of the project.
-
-*(Note: Without this data, the attribution engine will return empty results, though the AI segmentation will still work).*
-
-### 3. Setup & Run the Backend
-The machine learning `.pt` weights are **automatically downloaded** from Hugging Face Hub on the first run and cached locally. You do not need to manually download or place any model files!
-
-```bash
-# Navigate to the backend directory
-cd backend
-
-# Create and activate a virtual environment
-python -m venv venv
-.\venv\Scripts\activate   # Windows
-# source venv/bin/activate  # Mac/Linux
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the FastAPI server
-python -m uvicorn app.main:app --reload
-```
-The backend API will be available at `http://127.0.0.1:8000`. You can view the interactive Swagger docs at `http://127.0.0.1:8000/docs`.
-
-### 4. Setup & Run the Frontend
-Open a new terminal window:
-```bash
-# Navigate to the frontend directory
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start the Vite development server
-npm run dev
-```
-The frontend UI will be available at `http://localhost:5173`.
+Rather than relying on an unexplainable, monolithic black-box neural network, OASIS implements a 7-layer modular pipeline. Every downstream forensic conclusion is deterministically traceable to physical radar backscatter contrast, standard oceanic leeway dynamics, and auditable vessel movement data.
 
 ---
 
-## 🧪 Testing
+## 2. Core Architectural Principles
 
-We have provided a set of test SAR images in the `Test Images/` directory. You can upload these images directly through the frontend UI or the backend Swagger docs to test the U-Net segmentation and lookalike verification models.
+* **Modular Decoupling:** Every computational stage (detection, geometry, drift, AIS filtering, attribution) has a strictly typed data contract. Components can be independently inspected, tested, and upgraded.
+* **Deterministic Physics Over Black-Box AI:** Deep learning is restricted strictly to visual perception (SAR segmentation and patch verification). Drift modeling uses proven hydrodynamic equations, not uncalibrated recurrent networks.
+* **Truth in Engineering (Never Fabricate Evidence):** If AIS coverage is missing or vessel transponders were disabled, the system never invents a suspect. It flags an explicit "Dark Vessel / Attribution Unavailable" status and calculates tactical intercept coordinates for Indian Coast Guard aerial reconnaissance.
+* **Legal and Forensic Defensibility:** The platform produces court-admissible dossiers complete with SHA-256 chain-of-custody hashes, physical decibel contrast proof, and calibrated multi-factor attribution matrices.
 
 ---
 
-## 🏛️ Team
-**Team DDOS - Smart India Hackathon 2026**
+## 3. The 7-Layer System Architecture
 
-> **Core Principle:** Detect the spill → estimate its origin → find plausible vessel trajectories → rank candidates using explainable evidence.
+```text
+Layer 1: Raw Data Ingestion
+  - Sentinel-1 SAR Dual-Pol (VV/VH, C-band)
+  - ECMWF / ERA5 10m Atmospheric Wind Vectors
+  - Copernicus Marine (CMEMS) Surface Ocean Currents
+  - Historical & Streaming AIS Records (MarineCadastre / Coastal Feeds)
+
+Layer 2: Preprocessing & Spatial Indexing
+  - 512x512 SAR Tiling with dB Clipping [-30.0, 0.0] dB and Normalization
+  - Bilinear 2D Spatial & Linear Temporal Metocean Interpolation
+  - DuckDB / SQLite Spatiotemporal AIS Indexing (5-minute uniform resampling)
+
+Layer 3: Dual-AI Perception Engine
+  - Model 1: UNet++ Dual-Pol SAR Segmentation (Outputs Binary Mask & Heatmap)
+  - Task 2: OpenCV Metric Geometry Engine (Area in km2, Centroid, Elongation Angle)
+  - Model 2: Radiometric Forensic Verifier (Annulus Delta-dB Contrast & Boundary Sharpness)
+
+Layer 4: Deterministic Physics Drift Engine (SlickTrace)
+  - Lagrangian Leeway Advection (Current + 0.03*Wind + Coriolis Deflection)
+  - Backward Hindcasting to Probable Origin (P_0) with Expanding Uncertainty Buffer
+  - Forward Forecasting (12 to 24-hour coastal threat dispersion cone)
+
+Layer 5: AIS Correlation & Behavioral Attribution
+  - Spatiotemporal Cylinder Query: [(P_0 +/- Radius), (T_0 +/- 1 hour)]
+  - Model 3: Unsupervised Kinematic Anomaly Classifier (Detecting <5 kt tank-washing maneuvers)
+  - Task 5: Multi-Factor Utility Scoring (CPA Distance, Heading Match, Speed Drops)
+  - Dark Vessel Protocol (Aerial interdiction coordinates if AIS = 0)
+
+Layer 6: Forensic Evidence & Integrity
+  - Tamper-Evident SHA-256 Chain of Custody
+  - Multi-Dimensional Data Quality Index (Satellite, Weather, AIS completeness)
+
+Layer 7: Application & Command Delivery
+  - FastAPI Orchestration Layer (Asynchronous REST API)
+  - Tactical Command Center (React 19, TypeScript, MapLibre GL, Three.js 3D Globe)
+  - Official Court-Admissible ICG / NOS-DCP Forensic PDF Report Generator
